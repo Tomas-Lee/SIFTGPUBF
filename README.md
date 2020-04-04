@@ -1,0 +1,2 @@
+# SIFTGPUBF
+适配目前最新CUDA环境的SIFTGPU代码
