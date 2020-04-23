@@ -1,25 +1,12 @@
 #include <iostream>
-#include <fstream>
-#include <string>
-#include <iomanip>
 #include <vector>
 #include <algorithm>
-#include <math.h>
-
-#include <time.h>
-using namespace std;
-
 
 #include "GlobalUtil.h"
 #include "SiftGPU.h"
 #include "SiftPyramid.h"
 #include "ProgramCU.h"
 
-
-//#include "direct.h"
-#pragma warning (disable : 4786) 
-#pragma warning (disable : 4996) 
-#pragma warning (disable : 4891) 
 //////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
 
@@ -241,7 +228,9 @@ unsigned int SiftGPU::GetKeyPointsAndDescriptorsCUDA(SIFTImageGPU& siftImage, co
 {
 	_pyramid->GetKeyPointsCUDA((float4*)siftImage.d_keyPoints, d_depthData, maxNumKeyPoints);
 	_pyramid->GetFeatureVectorCUDA((unsigned char*)siftImage.d_keyPointDescs, maxNumKeyPoints);
-	return _pyramid->GetFeatureNum();
+	int feature_num=_pyramid->GetFeatureNum();
+    cutilSafeCall(cudaMemcpy(siftImage.d_keyPointCounter, &feature_num, sizeof(int), cudaMemcpyHostToDevice));
+	return feature_num;
 }
 
 void SiftGPU::GetKeyPointsCUDA(SiftKeypoint* d_keypoints, float* d_depthData, unsigned int maxNumKeyPoints /*= (unsigned int)-1*/)

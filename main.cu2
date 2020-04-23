@@ -1,0 +1,417 @@
+#include <iostream>
+
+#include "SiftGPU.h"
+#include "SiftMatch.h"
+#include "SiftCameraParams.h"
+
+#include <opencv2/opencv.hpp>
+//#include "glog/logging.h"
+using namespace cv;
+using namespace std;
+extern "C" void updateConstantSiftCameraParams(const SiftCameraParams& params);
+
+void resampleColorToIntensity(float* d_output, const uchar* d_input, unsigned int inputWidth, unsigned int inputHeight) {
+	int ncols = inputWidth *3;
+	int nrows = inputHeight ;    //rgb has 3 channels
+	for (int i = 0; i < nrows*ncols; i = i + 3) {
+		float tmp = (0.299f*d_input[i] + 0.587f*d_input[i + 1] + 0.114f*d_input[i + 2]) / 255.0f;   //输出0-1之间的值
+		d_output[i / 3] = tmp;
+	}
+}
+
+void resampleDepthToFloat(float* d_output, ushort* d_input, unsigned int inputWidth, unsigned int inputHeight, float depth_scale) {
+	int ncols = inputWidth;
+	int nrows = inputHeight;
+	int cnt = 0;
+	for (int i = 0; i < nrows*ncols; i++) {
+		float tmp = static_cast<float>(d_input[i]) / depth_scale;
+		d_output[i] = tmp;
+	}
+}
+
+int main(int argc, char** argv) {
+	google::InitGoogleLogging(argv[0]);
+	FLAGS_logtostderr = true;
+	google::InstallFailureSignalHandler();
+
+//	//处理输入数据1
+    Mat color = imread("../rgb2048.png", -1);	//8UC3
+    Mat depth = imread("../depth2048.png", -1);	//16UC1
+    if (color.empty() || depth.empty()) {
+        cerr << "Read image fail" << endl;
+        return 0;
+    }
+    int rows=color.rows;
+    int cols=color.cols;
+    cout << "color type: " << color.type() << endl;
+    cout << "depth type: " << depth.type() << endl;
+    // ushort /uchar to float
+    ushort* depth_ptr = reinterpret_cast<ushort*>(depth.data);
+    uchar* color_ptr = color.data;    //default channel order is BGR
+
+    float* colorf_ptr = new float[color.rows * color.cols];
+    resampleColorToIntensity(colorf_ptr, color_ptr, cols, rows);
+    float* depthf_ptr = new float[depth.rows * depth.cols];
+    resampleDepthToFloat(depthf_ptr, depth_ptr, cols, rows, 1000);
+
+    //cpu to gpu
+    float*	dev_depthf;	//on the gpu
+    float*	dev_colorf;	//on the gpu
+    cutilSafeCall(cudaMalloc(&dev_depthf, sizeof(float) * rows * cols));
+    cutilSafeCall(cudaMalloc(&dev_colorf, sizeof(float) * rows * cols));
+    cutilSafeCall(cudaMemcpy(dev_depthf, depthf_ptr, sizeof(float)*rows * cols, cudaMemcpyHostToDevice));
+    cutilSafeCall(cudaMemcpy(dev_colorf, colorf_ptr, sizeof(float)*rows * cols, cudaMemcpyHostToDevice));
+
+
+
+    //处理输入数据2
+    Mat color10 = imread("../rgb2048_10.png", -1);	//8UC3
+    Mat depth10 = imread("../depth2048_10.png", -1);	//16UC1
+    if (color10.empty() || depth10.empty()) {
+        cerr << "Read image fail" << endl;
+        return 0;
+    }
+//    int rows=color10.rows;
+//    int cols=color10.cols;
+    cout << "color type: " << color10.type() << endl;
+    cout << "depth type: " << depth10.type() << endl;
+    // ushort /uchar to float
+    ushort* depth10_ptr = reinterpret_cast<ushort*>(depth10.data);
+    uchar* color10_ptr = color10.data;    //default channel order is BGR
+
+    float* colorf10_ptr = new float[color10.rows * color10.cols];
+    resampleColorToIntensity(colorf10_ptr, color10_ptr, cols, rows);
+    float* depthf10_ptr = new float[depth10.rows * depth10.cols];
+    resampleDepthToFloat(depthf10_ptr, depth10_ptr, cols, rows, 1000);
+
+    //cpu to gpu
+    float*	dev_depthf10;	//on the gpu
+    float*	dev_colorf10;	//on the gpu
+    cutilSafeCall(cudaMalloc(&dev_depthf10, sizeof(float) * rows * cols));
+    cutilSafeCall(cudaMalloc(&dev_colorf10, sizeof(float) * rows * cols));
+    cutilSafeCall(cudaMemcpy(dev_depthf10, depthf10_ptr, sizeof(float)*rows * cols, cudaMemcpyHostToDevice));
+    cutilSafeCall(cudaMemcpy(dev_colorf10, colorf10_ptr, sizeof(float)*rows * cols, cudaMemcpyHostToDevice));
+
+
+//    //处理输入数据2
+//    int rows=1536;
+//    int cols=2048;
+//    float* colorf_ptr = new float[rows*cols];
+//    float* depthf_ptr = new float[rows*cols];
+//    FILE* pFile;
+//    if((pFile=fopen("../color2048.bin","rb"))==NULL){
+//        printf("can't open the color.bin");
+//        exit(0);
+//    }
+//
+//    FILE* pFile2;
+//    if((pFile2=fopen("../depth2048.bin","rb"))==NULL){
+//        printf("can't open the depth.bin");
+//        exit(0);
+//    }
+//    fread(depthf_ptr,sizeof(float),rows*cols,pFile2);
+//    fclose(pFile2);
+//    fread(colorf_ptr,sizeof(float),rows*cols,pFile);
+//    fclose(pFile);
+
+
+
+//    for(int i=0;i<rows*cols;i++){
+//        cout<<colorf_ptr[i]<<" ";
+//        if(!(i%6144)) cout<<endl;
+//    }
+//    exit(0);
+
+//    FILE* pFile3;
+//    if((pFile3=fopen("../tex/color1.bin","wb"))==NULL){
+//        printf("can't open the depth.bin");
+//        exit(0);
+//    }
+//    fwrite(colorf_ptr,sizeof(float),rows*cols,pFile3);
+//    fclose(pFile3);
+//
+//    FILE* pFile4;
+//    if((pFile4=fopen("../tex/depth1.bin","wb"))==NULL){
+//        printf("can't open the depth.bin");
+//        exit(0);
+//    }
+//    fwrite(depthf_ptr,sizeof(float),rows*cols,pFile4);
+//    fclose(pFile4);
+
+
+
+
+    //处理sift camera
+    // init sift camera constant params
+    SiftCameraParams siftCameraParams;
+    siftCameraParams.m_depthWidth = cols;
+    siftCameraParams.m_depthHeight = rows;
+    siftCameraParams.m_intensityWidth = cols;
+    siftCameraParams.m_intensityHeight = rows;
+    siftCameraParams.m_minKeyScale = 3; //GlobalBundlingState::get().s_minKeyScale;
+    updateConstantSiftCameraParams(siftCameraParams);
+
+
+	//初始化sift关键点提取器
+	const unsigned int s_widthSIFT = cols;
+	const unsigned int s_heightSIFT = rows;
+	const float s_sensorDepthMin = 0.1f;
+	const float s_sensorDepthMax = 4.0f;
+	SiftGPU* m_sift = new SiftGPU;
+	m_sift->SetParams(s_widthSIFT, s_heightSIFT, false, 150, s_sensorDepthMin, s_sensorDepthMax);
+	m_sift->InitSiftGPU();
+
+	//初始化sift特征匹配器
+	const unsigned int s_maxNumKeysPerImage = 1024;
+	SiftMatchGPU* m_siftMatcher = new SiftMatchGPU(s_maxNumKeysPerImage);
+	m_siftMatcher->InitSiftMatch();
+	ImagePairMatch imagePairMatch;
+	int maxImageMatches=1;
+    cutilSafeCall(cudaMalloc(&(imagePairMatch.d_numMatches),sizeof(int)*maxImageMatches));   //设置获取1024个关键点
+    cutilSafeCall(cudaMalloc(&(imagePairMatch.d_distances),sizeof(float)*maxImageMatches*128));   //总共存储128个距离
+    cutilSafeCall(cudaMalloc(&(imagePairMatch.d_keyPointIndices),sizeof(uint2)*maxImageMatches*128));   //设置获取1024个关键点
+
+
+	//run sift
+	int success = m_sift->RunSIFT(dev_colorf, dev_depthf);
+	if (!success) {
+		cerr << "Error running SIFT detection" << endl;
+	}
+	SIFTImageGPU imageGPU;
+    cutilSafeCall(cudaMalloc(&(imageGPU.d_keyPoints),sizeof(SIFTKeyPoint)*s_maxNumKeysPerImage));   //设置获取1024个关键点
+    cutilSafeCall(cudaMalloc(&(imageGPU.d_keyPointDescs),sizeof(SIFTKeyPointDesc)*s_maxNumKeysPerImage));   //设置获取1024个关键点
+    unsigned int numKeypoints = m_sift->GetKeyPointsAndDescriptorsCUDA(imageGPU, dev_depthf, s_maxNumKeysPerImage);
+    std::cout<<"Extract sift features = "<<numKeypoints<<std::endl;
+
+
+
+    //run sift2
+    int success10 = m_sift->RunSIFT(dev_colorf10, dev_depthf10);
+    if (!success10) {
+        cerr << "Error running SIFT detection" << endl;
+    }
+    SIFTImageGPU imageGPU10;
+    cutilSafeCall(cudaMalloc(&(imageGPU10.d_keyPoints),sizeof(SIFTKeyPoint)*s_maxNumKeysPerImage));   //设置获取1024个关键点
+    cutilSafeCall(cudaMalloc(&(imageGPU10.d_keyPointDescs),sizeof(SIFTKeyPointDesc)*s_maxNumKeysPerImage));   //设置获取1024个关键点
+    unsigned int numKeypoints10 = m_sift->GetKeyPointsAndDescriptorsCUDA(imageGPU10, dev_depthf10, s_maxNumKeysPerImage);
+    std::cout<<"Extract sift features = "<<numKeypoints10<<std::endl;
+
+
+    //match
+    m_siftMatcher->SetDescriptors(0, numKeypoints, (unsigned char*)imageGPU.d_keyPointDescs);
+    m_siftMatcher->SetDescriptors(1, numKeypoints10, (unsigned char*)imageGPU10.d_keyPointDescs);
+    float ratioMax = 0.8;
+    float s_siftMatchThresh=0.7;
+    m_siftMatcher->GetSiftMatch(numKeypoints, imagePairMatch, make_uint2(0,numKeypoints), s_siftMatchThresh, ratioMax);
+
+    //inspect match
+    int cpu_numMatches=-1;
+    float cpu_distances[maxImageMatches*128];
+    uint2 cpu_keyPointIndices[maxImageMatches*128];
+    cutilSafeCall(cudaMemcpy(&cpu_numMatches, imagePairMatch.d_numMatches, sizeof(int)*maxImageMatches, cudaMemcpyDeviceToHost));
+    cutilSafeCall(cudaMemcpy(cpu_distances, imagePairMatch.d_distances, sizeof(float)*maxImageMatches*128, cudaMemcpyDeviceToHost));
+    cutilSafeCall(cudaMemcpy(cpu_keyPointIndices, imagePairMatch.d_keyPointIndices, sizeof(uint)*maxImageMatches*128, cudaMemcpyDeviceToHost));
+    for(int i=0;i<128;i++){
+//        cout<<cpu_distances[i]<<" ";
+        cout<<"[ "<<cpu_keyPointIndices[i].x<<" , "<<cpu_keyPointIndices[i].y<<" ]   ";
+    }
+
+
+    //for test
+//    SIFTKeyPoint* cpu_keyPoints=new SIFTKeyPoint[s_maxNumKeysPerImage];
+//    cutilSafeCall(cudaMemcpy(cpu_keyPoints, imageGPU.d_keyPoints, sizeof(SIFTKeyPoint)*s_maxNumKeysPerImage, cudaMemcpyDeviceToHost));
+//    for(int i=0;i<1022;i++){
+//        cout<<"[ "<<cpu_keyPoints[i].pos.x<<" , "<<cpu_keyPoints[i].pos.y<<" ]"<<endl;
+//    }   //关键点数据有结果，但是结果不对
+
+	//    SIFTImageGPU imageGPU;
+	//    const uint m_maxKeyPointsPerImages=1024;    //=s_maxNumKeysPerImage, perimage the max keypoints
+	//    uint numKeypoints=m_sift->GetKeyPointsAndDescriptorsCUDA(imageGPU,depthf_ptr,m_maxKeyPointsPerImages);
+	//    for(int i=0;i<numKeypoints;i++){
+	//        cout<<"KeyPoints locations: "<<imageGPU.d_keyPoints->pos.x<<" , "<<imageGPU.d_keyPoints->pos.y<<endl;
+	//    }
+
+
+
+		//imshow("color", color);
+		//waitKey(0);
+
+
+		////提取关键点
+		//float* d_intensitySift;	//RGB图强度化之后的深度图
+		//float* d_inputDepthFilt;	//深度图CUDAImageUtil处理之后的深度图
+		////m_siftManager->createSIFTImageGPU()相关工作
+		//unsigned int m_maxNumImages = 1200;
+		//unsigned int m_maxKeyPointsPerImage;
+		//SIFTImageGPU* cur=new SIFTImageGPU;
+		//MLIB_CUDA_SAFE_CALL(cudaMalloc(&(cur->d_keyPoints), sizeof(SIFTKeyPoint)*m_maxNumImages*m_maxKeyPointsPerImage));	//分配设备内存空间
+		//MLIB_CUDA_SAFE_CALL(cudaMalloc(&(cur->d_keyPointDescs), sizeof(SIFTKeyPointDesc)*m_maxNumImages*m_maxKeyPointsPerImage));
+
+		//int success = m_sift->RunSIFT(d_intensitySift, d_inputDepthFilt);
+		//if (!success){
+		//	throw MLIB_EXCEPTION("Error running SIFT detection");
+		//}
+		//unsigned int maxKeyPointsPerImage = 4096;
+		//unsigned int numKeypoints = m_sift->GetKeyPointsAndDescriptorsCUDA(cur, d_inputDepthFilt, maxKeyPointsPerImage);
+
+		//if (numKeypoints > s_maxNumKeysPerImage){
+		//	throw MLIB_EXCEPTION("too many keypoints"); //should never happen
+		//}
+
+		//m_siftManager->finalizeSIFTImageGPU(numKeypoints);
+
+
+
+
+
+
+	std::cout << "HelloWorld" << std::endl;
+}
+
+//unsigned int matchAndFilter()
+//{
+//	const unsigned int numFrames = m_siftManager->getNumImages();
+//	MLIB_ASSERT(numFrames > 1);
+//	const unsigned int curFrame = m_siftManager->getCurrentFrame();
+//
+//	const std::vector<int>& validImages = m_siftManager->getValidImages();
+//
+//	// match with every other //TODO CLASS for image match proposals
+//	const unsigned int startFrame = numFrames == curFrame + 1 ? 0 : curFrame + 1;
+//	if (GlobalBundlingState::get().s_enableGlobalTimings) { cudaDeviceSynchronize(); m_timer.start(); }
+//	int num2 = (int)m_siftManager->getNumKeyPointsPerImage(curFrame);
+//	if (num2 == 0) return (unsigned int)-1;
+//
+//	for (unsigned int prev = startFrame; prev < numFrames; prev++) {
+//		if (prev == curFrame) continue;
+//		uint2 keyPointOffset = make_uint2(0, 0);
+//		ImagePairMatch& imagePairMatch = m_siftManager->getImagePairMatch(prev, curFrame, keyPointOffset);
+//
+//		SIFTImageGPU& image_i = m_siftManager->getImageGPU(prev);
+//		SIFTImageGPU& image_j = m_siftManager->getImageGPU(curFrame);
+//		int num1 = (int)m_siftManager->getNumKeyPointsPerImage(prev);
+//
+//		if (validImages[prev] == 0 || num1 == 0 || num2 == 0) {
+//			unsigned int numMatch = 0;
+//			MLIB_CUDA_SAFE_CALL(cudaMemcpy(imagePairMatch.d_numMatches, &numMatch, sizeof(unsigned int), cudaMemcpyHostToDevice));
+//		}
+//		else {
+//			m_siftMatcher->SetDescriptors(0, num1, (unsigned char*)image_i.d_keyPointDescs);
+//			m_siftMatcher->SetDescriptors(1, num2, (unsigned char*)image_j.d_keyPointDescs);
+//			float ratioMax = m_bIsLocal ? GlobalBundlingState::get().s_siftMatchRatioMaxLocal : GlobalBundlingState::get().s_siftMatchRatioMaxGlobal; //TODO do we need two different here?
+//			m_siftMatcher->GetSiftMatch(num1, imagePairMatch, keyPointOffset, GlobalBundlingState::get().s_siftMatchThresh, ratioMax);
+//		}
+//	}
+//	if (GlobalBundlingState::get().s_enableGlobalTimings) { cudaDeviceSynchronize(); m_timer.stop(); TimingLog::getFrameTiming(m_bIsLocal).timeSiftMatching = m_timer.getElapsedTimeMS(); }
+//
+//	unsigned int lastMatchedFrame = (unsigned int)-1;
+//	if (curFrame > 0) { // can have a match to another frame
+//
+//		// --- sort the current key point matches
+//		if (GlobalBundlingState::get().s_enableGlobalTimings) { cudaDeviceSynchronize(); m_timer.start(); }
+//		m_siftManager->SortKeyPointMatchesCU(curFrame, startFrame, numFrames);
+//#ifdef EVALUATE_SPARSE_CORRESPONDENCES
+//		if (m_corrEvaluator) m_corrEvaluator->evaluate(m_siftManager, m_cudaCache, MatrixConversion::toMlib(m_siftIntrinsicsInv), false, true, false, "raw");
+//#endif
+//		////debugging
+//		//const bool usedebug = true;//!m_bIsLocal;// && curFrame >= 49;
+//		//std::vector<unsigned int> numMatches;
+//		//if (usedebug) {
+//		//	m_siftManager->getNumRawMatchesDEBUG(numMatches);
+//		//	SiftVisualization::printCurrentMatches("debug/rawMatches/", m_siftManager, m_cudaCache, false);
+//		//	int a = 5;
+//		//}
+//		////debugging
+//
+//		// --- filter matches
+//		const unsigned int minNumMatches = m_bIsLocal ? GlobalBundlingState::get().s_minNumMatchesLocal : GlobalBundlingState::get().s_minNumMatchesGlobal;
+//		//SIFTMatchFilter::ransacKeyPointMatches(siftManager, siftIntrinsicsInv, minNumMatches, GlobalBundlingState::get().s_maxKabschResidual2, false);
+//		//SIFTMatchFilter::filterKeyPointMatches(siftManager, siftIntrinsicsInv, minNumMatches);
+//		m_siftManager->FilterKeyPointMatchesCU(curFrame, startFrame, numFrames, m_siftIntrinsicsInv, minNumMatches, GlobalBundlingState::get().s_maxKabschResidual2);
+//		if (GlobalBundlingState::get().s_enableGlobalTimings) { cudaDeviceSynchronize(); m_timer.stop(); TimingLog::getFrameTiming(m_bIsLocal).timeMatchFilterKeyPoint = m_timer.getElapsedTimeMS(); }
+//#ifdef EVALUATE_SPARSE_CORRESPONDENCES
+//		if (m_corrEvaluator) m_corrEvaluator->evaluate(m_siftManager, m_cudaCache, MatrixConversion::toMlib(m_siftIntrinsicsInv), true, false, false, "kabsch");
+//#endif
+//		////debugging
+//		//if (usedebug) {
+//		//	m_siftManager->getNumFiltMatchesDEBUG(numMatches);
+//		//	SiftVisualization::printCurrentMatches("debug/matchesKeyFilt/", m_siftManager, m_cudaCache, true);
+//		//	int a = 5;
+//		//}
+//		////debugging
+//
+//		// --- surface area filter
+//		if (GlobalBundlingState::get().s_enableGlobalTimings) { cudaDeviceSynchronize(); m_timer.start(); }
+//		//const std::vector<CUDACachedFrame>& cachedFrames = cudaCache->getCacheFrames();
+//		//SIFTMatchFilter::filterBySurfaceArea(siftManager, cachedFrames);
+//		m_siftManager->FilterMatchesBySurfaceAreaCU(curFrame, startFrame, numFrames, m_siftIntrinsicsInv, GlobalBundlingState::get().s_surfAreaPcaThresh);
+//		if (GlobalBundlingState::get().s_enableGlobalTimings) { cudaDeviceSynchronize(); m_timer.stop(); TimingLog::getFrameTiming(m_bIsLocal).timeMatchFilterSurfaceArea = m_timer.getElapsedTimeMS(); }
+//#ifdef EVALUATE_SPARSE_CORRESPONDENCES
+//		if (m_corrEvaluator) m_corrEvaluator->evaluate(m_siftManager, m_cudaCache, MatrixConversion::toMlib(m_siftIntrinsicsInv), true, false, false, "sa");
+//#endif
+//		////debugging
+//		//if (usedebug) {
+//		//	m_siftManager->getNumFiltMatchesDEBUG(numMatches);
+//		//	SiftVisualization::printCurrentMatches("debug/matchesSAFilt/", m_siftManager, m_cudaCache, true);
+//		//	int a = 5;
+//		//}
+//		////debugging
+//
+//		// --- dense verify filter
+//		if (GlobalBundlingState::get().s_enableGlobalTimings) { cudaDeviceSynchronize(); m_timer.start(); }
+//		//SIFTMatchFilter::filterByDenseVerify(siftManager, cachedFrames);
+//		const CUDACachedFrame* cachedFramesCUDA = m_cudaCache->getCacheFramesGPU();
+//		m_siftManager->FilterMatchesByDenseVerifyCU(curFrame, startFrame, numFrames, m_cudaCache->getWidth(), m_cudaCache->getHeight(), MatrixConversion::toCUDA(m_cudaCache->getIntrinsics()),
+//			cachedFramesCUDA, GlobalBundlingState::get().s_projCorrDistThres, GlobalBundlingState::get().s_projCorrNormalThres,
+//			GlobalBundlingState::get().s_projCorrColorThresh, GlobalBundlingState::get().s_verifySiftErrThresh, GlobalBundlingState::get().s_verifySiftCorrThresh,
+//			GlobalAppState::get().s_sensorDepthMin, GlobalAppState::get().s_sensorDepthMax);
+//		//0.1f, 3.0f);
+//		if (GlobalBundlingState::get().s_enableGlobalTimings) { cudaDeviceSynchronize(); m_timer.stop(); TimingLog::getFrameTiming(m_bIsLocal).timeMatchFilterDenseVerify = m_timer.getElapsedTimeMS(); }
+//#ifdef EVALUATE_SPARSE_CORRESPONDENCES
+//		if (m_corrEvaluator) m_corrEvaluator->evaluate(m_siftManager, m_cudaCache, MatrixConversion::toMlib(m_siftIntrinsicsInv), true, false, true, "dense");
+//#endif
+//		////debugging
+//		//if (usedebug) {
+//		//	m_siftManager->getNumFiltMatchesDEBUG(numMatches);
+//		//	SiftVisualization::printCurrentMatches("debug/filtMatches/", m_siftManager, m_cudaCache, true);
+//		//	int a = 5;
+//		//}
+//		////debugging
+//
+//		// --- filter frames
+//		if (GlobalBundlingState::get().s_enableGlobalTimings) { cudaDeviceSynchronize(); m_timer.start(); }
+//		lastMatchedFrame = m_siftManager->filterFrames(curFrame, startFrame, numFrames);
+//		// --- add to global correspondences
+//		MLIB_ASSERT((m_siftManager->getValidImages()[curFrame] != 0 && lastMatchedFrame != (unsigned int)-1) || (lastMatchedFrame == (unsigned int)-1 && m_siftManager->getValidImages()[curFrame] == 0)); //TODO REMOVE
+//		if (lastMatchedFrame != (unsigned int)-1)//if (siftManager->getValidImages()[curFrame] != 0)
+//			m_siftManager->AddCurrToResidualsCU(curFrame, startFrame, numFrames, m_siftIntrinsicsInv);
+//		//else lastValid = false;
+//		if (GlobalBundlingState::get().s_enableGlobalTimings) { cudaDeviceSynchronize(); m_timer.stop(); TimingLog::getFrameTiming(m_bIsLocal).timeMisc = m_timer.getElapsedTimeMS(); }
+//
+//		if (!m_bIsLocal) { //global only
+//			if (lastMatchedFrame != (unsigned int)-1 && lastMatchedFrame + 1 != curFrame) { //re-initialize to better location based off of last match
+//				MLIB_CUDA_SAFE_CALL(cudaMemcpy(d_trajectory + curFrame, d_trajectory + lastMatchedFrame, sizeof(float4x4), cudaMemcpyDeviceToDevice));
+//				MLIB_CUDA_SAFE_CALL(cudaMemcpy(d_trajectory + curFrame + 1, d_trajectory + lastMatchedFrame, sizeof(float4x4), cudaMemcpyDeviceToDevice));
+//			}
+//			//retry
+//			if (curFrame + 1 == numFrames) { // this is a current frame (and not a retry frame)
+//				if (lastMatchedFrame != (unsigned int)-1) //1 revalidation per frame 
+//					tryRevalidation(curFrame, false);
+//				else {
+//					if (GlobalBundlingState::get().s_verbose && curFrame + 1 == numFrames)
+//						std::cout << "WARNING: last image (" << curFrame << ") not valid! no new global images for solve" << std::endl;
+//					m_siftManager->addToRetryList(curFrame);
+//				}
+//			}
+//		} //global only
+//
+//		////debugging
+//		//if (usedebug) {
+//		//	std::vector<EntryJ> corrs(m_siftManager->getNumGlobalCorrespondences());
+//		//	if (!corrs.empty()) MLIB_CUDA_SAFE_CALL(cudaMemcpy(corrs.data(), m_siftManager->getGlobalCorrespondencesGPU(), sizeof(EntryJ)*corrs.size(), cudaMemcpyDeviceToHost));
+//		//	int a = 5;
+//		//}
+//		////debugging
+//	}
+//	return lastMatchedFrame;
+//}

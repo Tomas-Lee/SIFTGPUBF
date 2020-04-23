@@ -1,10 +1,5 @@
 #include <iostream>
-#include <iomanip>
 #include <vector>
-#include <sstream>
-#include <algorithm>
-using namespace std;
-#include <string.h>
 
 #include <cuda_runtime.h>
 

@@ -4,9 +4,13 @@
 #define _IMAGE_MANAGER_H_
 
 #include <iostream>
+
+#include <opencv2/opencv.hpp>
+
 #include "SiftCameraParams.h"
 #include "SiftGPU.h"
 #include "SiftMatch.h"
+
 
 extern "C" void updateConstantSiftCameraParams(const SiftCameraParams& params);
 
@@ -17,7 +21,7 @@ public:
         color_height=height;
         depth_width=width;
         depth_height=height;
-        minKeyScale=3;
+        minKeyScale=3.0f;
         sensorDepthMin=0.1;
         sensorDepthMax=4;
         featureCountThreshold=150;
@@ -58,6 +62,7 @@ public:
         m_sift->RunSIFT(dev_color1,dev_depth1);
         numKeypoints1 = m_sift->GetKeyPointsAndDescriptorsCUDA(imageGPU1, dev_depth1, maxNumKeypointsPerImage);
         std::cout<<"Extract 1 sift features = "<<numKeypoints1<<std::endl;
+        vkps1=GetOpenCVKeypoints(imageGPU1);
     }
 
     void RunSIFT2(const unsigned char* cpu_color_uchar_ptr,ushort* cpu_depth_ushort_ptr, float depth_scale){
@@ -66,12 +71,13 @@ public:
         m_sift->RunSIFT(dev_color2,dev_depth2);
         numKeypoints2 = m_sift->GetKeyPointsAndDescriptorsCUDA(imageGPU2, dev_depth2, maxNumKeypointsPerImage);
         std::cout<<"Extract 2 sift features = "<<numKeypoints2<<std::endl;
+        vkps2=GetOpenCVKeypoints(imageGPU2);
     }
 
-    void Match(){
+    std::vector<cv::DMatch> Match(){
         m_siftMatcher->SetDescriptors(0, numKeypoints1, (unsigned char*)imageGPU1.d_keyPointDescs);
         m_siftMatcher->SetDescriptors(1, numKeypoints2, (unsigned char*)imageGPU2.d_keyPointDescs);
-        m_siftMatcher->GetSiftMatch(numKeypoints1, imagePairMatch, make_uint2(0,numKeypoints1), siftMatchThresh, ratioMax);
+        m_siftMatcher->GetSiftMatch(numKeypoints1, imagePairMatch, make_uint2(0,0), siftMatchThresh, ratioMax);
 
         //just for show inspect match
         int cpu_numMatches=-1;
@@ -80,11 +86,49 @@ public:
         cutilSafeCall(cudaMemcpy(&cpu_numMatches, imagePairMatch.d_numMatches, sizeof(int)*maxImageMatches, cudaMemcpyDeviceToHost));
         cutilSafeCall(cudaMemcpy(cpu_distances, imagePairMatch.d_distances, sizeof(float)*maxImageMatches*128, cudaMemcpyDeviceToHost));
         cutilSafeCall(cudaMemcpy(cpu_keyPointIndices, imagePairMatch.d_keyPointIndices, sizeof(uint)*maxImageMatches*128, cudaMemcpyDeviceToHost));
-        for(int i=0;i<128;i++){
-//        cout<<cpu_distances[i]<<" ";
+        std::cout<<" Matches num = "<<cpu_numMatches<<std::endl;
+
+        std::vector<cv::DMatch> matches;
+        for(int i=0;i<cpu_numMatches;i++){
+//            std::cout<<cpu_distances[i]<<" "<<std::endl;
             std::cout<<"[ "<<cpu_keyPointIndices[i].x<<" , "<<cpu_keyPointIndices[i].y<<" ]   ";
+//            int id=GetKeypointIDbyXY(cpu_keyPointIndices[i].x, cpu_keyPointIndices[i].y);
+            matches.push_back(cv::DMatch(cpu_keyPointIndices[i].x,cpu_keyPointIndices[i].y,2,cpu_distances[i]));
         }
+        return matches;
     }
+
+    std::vector<cv::KeyPoint> GetOpenCVKeypoints(SIFTImageGPU image_gpu){
+        //将cuda中的特征点传回host
+        SIFTKeyPoint kps[maxNumKeypointsPerImage];
+        cutilSafeCall(cudaMemcpy(kps, image_gpu.d_keyPoints, sizeof(int)*maxNumKeypointsPerImage, cudaMemcpyDeviceToHost));
+        int kps_num;
+        cutilSafeCall(cudaMemcpy(&kps_num, image_gpu.d_keyPointCounter, sizeof(int), cudaMemcpyDeviceToHost));
+        //生成opencv格式的关键点坐标
+        std::vector<cv::KeyPoint> vkps;
+        for(int i=0;i<kps_num;i++){
+            vkps.push_back(cv::KeyPoint(kps[i].pos.x,kps[i].pos.y,1 )); //kp size default =1
+//            std::cout<<kps[i].pos.x<<" "<<kps[i].pos.y<<std::endl;
+            std::cout<<"[ "<<kps[i].pos.x<<" , "<<kps[i].pos.y<<" ]   ";
+
+        }
+        std::cout<<std::endl;
+        return vkps;
+    }
+    int GetKeypointIDbyXY(float x, float y){
+        std::cout<<"Process frame ---"<<x<<"---"<<y<<"----"<<std::endl;
+        for(int j=0;j<numKeypoints2;j++){
+            if(x==vkps2[j].pt.x && y==vkps2[j].pt.y){
+                return j;
+            }
+        }
+        std::cout<<"[ "<<x<<" , "<<y<<" ] is not in img2"<<std::endl;
+        return -1;
+    }
+
+    std::vector<cv::KeyPoint> vkps1;
+    std::vector<cv::KeyPoint> vkps2;
+
 
 private:
     //param
@@ -106,7 +150,7 @@ private:
     //
     SiftGPU* m_sift;
     SiftMatchGPU* m_siftMatcher;
-    SIFTImageGPU imageGPU1; //in gpu
+    SIFTImageGPU imageGPU1; //结构体对象是建立在host内存当中的，但是成员指针却是指向gpu显存的
     SIFTImageGPU imageGPU2;
     ImagePairMatch imagePairMatch;
 
@@ -117,33 +161,40 @@ private:
     int numKeypoints1=-1;
     int numKeypoints2=-1;
 
+
     void allocCUDA(){
-        cutilSafeCall(cudaMalloc(&(imagePairMatch.d_numMatches),sizeof(int)*maxImageMatches));   //设置获取1024个关键点
+        //分配match
+        cutilSafeCall(cudaMalloc(&(imagePairMatch.d_numMatches),sizeof(int)*maxImageMatches));   //设置一个图最多匹配几个图
         cutilSafeCall(cudaMalloc(&(imagePairMatch.d_distances),sizeof(float)*maxImageMatches*maxMatchesPerImagePairRaw));   //总共存储128个距离
-        cutilSafeCall(cudaMalloc(&(imagePairMatch.d_keyPointIndices),sizeof(uint2)*maxImageMatches*maxMatchesPerImagePairRaw));   //设置获取1024个关键点
-
-        cutilSafeCall(cudaMalloc(&(imageGPU1.d_keyPoints),sizeof(SIFTKeyPoint)*maxMatchesPerImagePairRaw));   //设置获取1024个关键点
-        cutilSafeCall(cudaMalloc(&(imageGPU1.d_keyPointDescs),sizeof(SIFTKeyPointDesc)*maxMatchesPerImagePairRaw));   //设置获取1024个关键点
-
-        cutilSafeCall(cudaMalloc(&(imageGPU2.d_keyPoints),sizeof(SIFTKeyPoint)*maxMatchesPerImagePairRaw));   //设置获取1024个关键点
-        cutilSafeCall(cudaMalloc(&(imageGPU2.d_keyPointDescs),sizeof(SIFTKeyPointDesc)*maxMatchesPerImagePairRaw));   //设置获取1024个关键点
-
-        cutilSafeCall(cudaMalloc(&dev_color1,sizeof(float)*color_width*color_height));   //设置获取1024个关键点
-        cutilSafeCall(cudaMalloc(&dev_depth1,sizeof(float)*depth_width*depth_height));   //设置获取1024个关键点
-
-        cutilSafeCall(cudaMalloc(&dev_color2,sizeof(float)*color_width*color_height));   //设置获取1024个关键点
-        cutilSafeCall(cudaMalloc(&dev_depth2,sizeof(float)*depth_width*depth_height));   //设置获取1024个关键点
+        cutilSafeCall(cudaMalloc(&(imagePairMatch.d_keyPointIndices),sizeof(uint2)*maxImageMatches*maxMatchesPerImagePairRaw));
+        //alloc imageGPU1
+        cutilSafeCall(cudaMalloc(&(imageGPU1.d_keyPoints),sizeof(SIFTKeyPoint)*maxNumKeypointsPerImage));   //设置获取4096个关键点
+        cutilSafeCall(cudaMalloc(&(imageGPU1.d_keyPointDescs),sizeof(SIFTKeyPointDesc)*maxNumKeypointsPerImage));   //设置获取4096个关键点
+        cutilSafeCall(cudaMalloc(&(imageGPU1.d_keyPointCounter),sizeof(int)));   //设置该图像的特征点个数
+        //alloc imageGPU2
+        cutilSafeCall(cudaMalloc(&(imageGPU2.d_keyPoints),sizeof(SIFTKeyPoint)*maxNumKeypointsPerImage));   //设置获取4096个关键点
+        cutilSafeCall(cudaMalloc(&(imageGPU2.d_keyPointDescs),sizeof(SIFTKeyPointDesc)*maxNumKeypointsPerImage));   //设置获取4096个关键点
+        cutilSafeCall(cudaMalloc(&(imageGPU2.d_keyPointCounter),sizeof(int)));   //设置该图像的特征点个数
+        //rgbd1
+        cutilSafeCall(cudaMalloc(&dev_color1,sizeof(float)*color_width*color_height));   //设置获取4096个关键点
+        cutilSafeCall(cudaMalloc(&dev_depth1,sizeof(float)*depth_width*depth_height));   //设置获取4096个关键点
+        //rgbd2
+        cutilSafeCall(cudaMalloc(&dev_color2,sizeof(float)*color_width*color_height));   //设置获取4096个关键点
+        cutilSafeCall(cudaMalloc(&dev_depth2,sizeof(float)*depth_width*depth_height));   //设置获取4096个关键点
     }
     void freeCUDA(){
         cudaFree(imagePairMatch.d_numMatches);
         cudaFree(imagePairMatch.d_distances);
         cudaFree(imagePairMatch.d_keyPointIndices);
 
+        //imageGPU1
         cudaFree(imageGPU1.d_keyPoints);
         cudaFree(imageGPU1.d_keyPointDescs);
-
+        cudaFree(imageGPU1.d_keyPointCounter);
+        //imageGPU2
         cudaFree(imageGPU2.d_keyPoints);
         cudaFree(imageGPU2.d_keyPointDescs);
+        cudaFree(imageGPU2.d_keyPointCounter);
 
         cudaFree(dev_color1);
         cudaFree(dev_depth1);
@@ -153,10 +204,10 @@ private:
 
     }
 
-    void resampleColorToIntensity(float* dev_output, const unsigned char* cpu_input, unsigned int inputWidth, unsigned int inputHeight) {
+    static void resampleColorToIntensity(float* dev_output, const unsigned char* cpu_input, unsigned int inputWidth, unsigned int inputHeight) {
         float* cpu_output=new float[inputWidth*inputHeight*3];
-        int ncols = inputWidth *3;
-        int nrows = inputHeight ;    //rgb has 3 channels
+        unsigned int ncols = inputWidth *3;
+        unsigned int nrows = inputHeight ;    //rgb has 3 channels
         for (int i = 0; i < nrows*ncols; i = i + 3) {
             float tmp = (0.299f*cpu_input[i] + 0.587f*cpu_input[i + 1] + 0.114f*cpu_input[i + 2]) / 255.0f;   //输出0-1之间的值
             cpu_output[i / 3] = tmp;
@@ -165,20 +216,20 @@ private:
         }
         cutilSafeCall(cudaMemcpy(dev_output, cpu_output, sizeof(float)*inputWidth*inputHeight, cudaMemcpyHostToDevice));
         cudaDeviceSynchronize();
-        delete cpu_output;
+        delete[] cpu_output;
     }
 
-    void resampleDepthToFloat(float* dev_output, ushort* cpu_input, unsigned int inputWidth, unsigned int inputHeight, float depth_scale) {
+    static void resampleDepthToFloat(float* dev_output, ushort* cpu_input, unsigned int inputWidth, unsigned int inputHeight, float depth_scale) {
         float* cpu_output=new float[inputWidth*inputHeight];
-        int ncols = inputWidth;
-        int nrows = inputHeight;
+        unsigned int ncols = inputWidth;
+        unsigned int nrows = inputHeight;
         int cnt = 0;
         for (int i = 0; i < nrows*ncols; i++) {
             float tmp = static_cast<float>(cpu_input[i]) / depth_scale;
             cpu_output[i] = tmp;
         }
         cutilSafeCall(cudaMemcpy(dev_output, cpu_output, sizeof(float)*inputWidth*inputHeight, cudaMemcpyHostToDevice));
-        delete cpu_output;
+        delete[] cpu_output;
     }
 
 };

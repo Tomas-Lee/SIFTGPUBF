@@ -128,7 +128,6 @@ void SiftPyramid::RunSIFT(float* d_colorData, const float* d_depthData)
 		_timer->endEvent();
 	}
 
-
 	//*****************
 	//detect key points
 	//*****************
@@ -139,8 +138,6 @@ void SiftPyramid::RunSIFT(float* d_colorData, const float* d_depthData)
 	if (GlobalUtil::_EnableDetailedTimings) {
 		_timer->endEvent();
 	}
-
-
 
 	//********************
 	//limit feature count
@@ -153,8 +150,6 @@ void SiftPyramid::RunSIFT(float* d_colorData, const float* d_depthData)
 		_timer->endEvent();
 	}
 
-
-
 	//************************
 	//get feature orientations
 	//************************
@@ -166,7 +161,6 @@ void SiftPyramid::RunSIFT(float* d_colorData, const float* d_depthData)
 	if (GlobalUtil::_EnableDetailedTimings) {
 		_timer->endEvent();
 	}
-
 
 	//************************
 	//reshape feature list

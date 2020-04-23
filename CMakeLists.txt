@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.5)
 project(siftgpu)
 
 add_compile_options(-std=c++11)
-
 #CUDA
 find_package(CUDA REQUIRED)
 set(CUDA_SEPARABLE_COMPILATION ON)

@@ -2,8 +2,6 @@
 #define GPU_SIFT_H
 
 #include <vector>
-//#include "SIFTImageManager.h"
-//#include "mLibCore.h"
 #include "cuda_runtime.h"
 #include "GlobalDefines.h"
 
@@ -18,15 +16,15 @@ struct SIFTKeyPointDesc {
 };
 
 struct SIFTImageGPU {
-    //int*					d_keyPointCounter;	//single counter value per image (into into global array)	//TODO we need this counter if we do multimatching
+    int* 					d_keyPointCounter;	//single counter value per image (into into global array) 这里我的定义跟原版不同，存储已经提取到的特征点个数
     SIFTKeyPoint*			d_keyPoints;		//array of key points (index into global array)
     SIFTKeyPointDesc*		d_keyPointDescs;	//array of key point descs (index into global array)
 };
 
 struct ImagePairMatch {
-    int*		d_numMatches;		//single counter value per image
-    float*		d_distances;		//array of distance (one per match)
-    uint2*		d_keyPointIndices;	//array of index pair (one per match)
+    int*		d_numMatches;		//single counter value per image, 存储基本参考图像跟索引图像的匹配数目，这只是一个int[1]的数组
+    float*		d_distances;		//array of distance (one per match)     //
+    uint2*		d_keyPointIndices;	//array of index pair (one per match)   //存储该参考图像的每个点跟索引图像哪个点最匹配，个数为参考图像的关键点个数
 };
 
 //correspondence_idx -> image_Idx_i,j
@@ -92,7 +90,6 @@ public:
 };
 
 class SiftPyramid;
-class ImageList;
 ////////////////////////////////////////////////////////////////
 //class SIftGPU
 //description: Interface of SiftGPU lib
