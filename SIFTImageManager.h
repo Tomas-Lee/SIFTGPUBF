@@ -57,8 +57,38 @@ public:
     }
 
     void RunSIFT1(const unsigned char* cpu_color_uchar_ptr,ushort* cpu_depth_ushort_ptr, float depth_scale){
-        resampleColorToIntensity(dev_color1,cpu_color_uchar_ptr,color_width,color_height);
-        resampleDepthToFloat(dev_depth1,cpu_depth_ushort_ptr,depth_width,depth_height,depth_scale);
+//        resampleColorToIntensity(dev_color1,cpu_color_uchar_ptr,color_width,color_height);
+//        resampleDepthToFloat(dev_depth1,cpu_depth_ushort_ptr,depth_width,depth_height,depth_scale);
+
+        int rows=480;
+        int cols=640;
+
+        float* depth_ptr = new float[rows*cols];
+        FILE* pFile0;
+        if((pFile0=fopen("../depth0.bin","rb"))==NULL){
+            printf("can't open the depth.bin");
+            exit(0);
+        }
+        fread(depth_ptr,sizeof(float),640*480,pFile0);
+        cutilSafeCall(cudaMemcpy(dev_depth1, depth_ptr, sizeof(float)*rows * cols, cudaMemcpyHostToDevice));
+        fclose(pFile0);
+        delete[] depth_ptr;
+
+
+        float* color_ptr = new float[rows*cols];
+
+        FILE* pFile1;
+        if((pFile1=fopen("../color0.bin","rb"))==NULL){
+            printf("can't open the color.bin");
+            exit(0);
+        }
+        fread(color_ptr,sizeof(float),640*480,pFile1);
+        cutilSafeCall(cudaMemcpy(dev_color1, color_ptr, sizeof(float)*rows * cols, cudaMemcpyHostToDevice));
+        fclose(pFile1);
+        delete[] color_ptr;
+
+
+
         m_sift->RunSIFT(dev_color1,dev_depth1);
         numKeypoints1 = m_sift->GetKeyPointsAndDescriptorsCUDA(imageGPU1, dev_depth1, maxNumKeypointsPerImage);
         std::cout<<"Extract 1 sift features = "<<numKeypoints1<<std::endl;
@@ -66,8 +96,36 @@ public:
     }
 
     void RunSIFT2(const unsigned char* cpu_color_uchar_ptr,ushort* cpu_depth_ushort_ptr, float depth_scale){
-        resampleColorToIntensity(dev_color2,cpu_color_uchar_ptr,color_width,color_height);
-        resampleDepthToFloat(dev_depth2,cpu_depth_ushort_ptr,depth_width,depth_height,depth_scale);
+//        resampleColorToIntensity(dev_color2,cpu_color_uchar_ptr,color_width,color_height);
+//        resampleDepthToFloat(dev_depth2,cpu_depth_ushort_ptr,depth_width,depth_height,depth_scale);
+
+        int rows=480;
+        int cols=640;
+
+        float* depth_ptr = new float[rows*cols];
+        FILE* pFile0;
+        if((pFile0=fopen("../depth1.bin","rb"))==NULL){
+            printf("can't open the depth.bin");
+            exit(0);
+        }
+        fread(depth_ptr,sizeof(float),640*480,pFile0);
+        cutilSafeCall(cudaMemcpy(dev_depth2, depth_ptr, sizeof(float)*rows * cols, cudaMemcpyHostToDevice));
+        fclose(pFile0);
+        delete[] depth_ptr;
+
+
+        float* color_ptr = new float[rows*cols];
+
+        FILE* pFile1;
+        if((pFile1=fopen("../color1.bin","rb"))==NULL){
+            printf("can't open the color.bin");
+            exit(0);
+        }
+        fread(color_ptr,sizeof(float),640*480,pFile1);
+        cutilSafeCall(cudaMemcpy(dev_color2, color_ptr, sizeof(float)*rows * cols, cudaMemcpyHostToDevice));
+        fclose(pFile1);
+        delete[] color_ptr;
+
         m_sift->RunSIFT(dev_color2,dev_depth2);
         numKeypoints2 = m_sift->GetKeyPointsAndDescriptorsCUDA(imageGPU2, dev_depth2, maxNumKeypointsPerImage);
         std::cout<<"Extract 2 sift features = "<<numKeypoints2<<std::endl;
@@ -77,7 +135,7 @@ public:
     std::vector<cv::DMatch> Match(){
         m_siftMatcher->SetDescriptors(0, numKeypoints1, (unsigned char*)imageGPU1.d_keyPointDescs);
         m_siftMatcher->SetDescriptors(1, numKeypoints2, (unsigned char*)imageGPU2.d_keyPointDescs);
-        m_siftMatcher->GetSiftMatch(numKeypoints1, imagePairMatch, make_uint2(0,0), siftMatchThresh, ratioMax);
+        m_siftMatcher->GetSiftMatch(numKeypoints1, imagePairMatch, make_uint2(0,numKeypoints1), siftMatchThresh, ratioMax);
 
         //just for show inspect match
         int cpu_numMatches=-1;
@@ -90,40 +148,40 @@ public:
 
         std::vector<cv::DMatch> matches;
         for(int i=0;i<cpu_numMatches;i++){
-//            std::cout<<cpu_distances[i]<<" "<<std::endl;
+            std::cout<<cpu_distances[i]<<" ";
             std::cout<<"[ "<<cpu_keyPointIndices[i].x<<" , "<<cpu_keyPointIndices[i].y<<" ]   ";
-//            int id=GetKeypointIDbyXY(cpu_keyPointIndices[i].x, cpu_keyPointIndices[i].y);
             matches.push_back(cv::DMatch(cpu_keyPointIndices[i].x,cpu_keyPointIndices[i].y,2,cpu_distances[i]));
+            std::cout<<std::endl;
         }
         return matches;
     }
 
     std::vector<cv::KeyPoint> GetOpenCVKeypoints(SIFTImageGPU image_gpu){
         //将cuda中的特征点传回host
+        SIFTKeyPointDesc kpsDesc[maxNumKeypointsPerImage];
+        cutilSafeCall(cudaMemcpy(kpsDesc, image_gpu.d_keyPointDescs, sizeof(SIFTKeyPointDesc)*maxNumKeypointsPerImage, cudaMemcpyDeviceToHost));
+
         SIFTKeyPoint kps[maxNumKeypointsPerImage];
-        cutilSafeCall(cudaMemcpy(kps, image_gpu.d_keyPoints, sizeof(int)*maxNumKeypointsPerImage, cudaMemcpyDeviceToHost));
+        cutilSafeCall(cudaMemcpy(kps, image_gpu.d_keyPoints, sizeof(SIFTKeyPoint)*maxNumKeypointsPerImage, cudaMemcpyDeviceToHost));
+
         int kps_num;
         cutilSafeCall(cudaMemcpy(&kps_num, image_gpu.d_keyPointCounter, sizeof(int), cudaMemcpyDeviceToHost));
+
         //生成opencv格式的关键点坐标
         std::vector<cv::KeyPoint> vkps;
         for(int i=0;i<kps_num;i++){
+//            int sum=0;
+//            for(int j=0;j<128;j++){
+//                sum=sum+int(kpsDesc[i].feature[j]);
+//            }
+//            std::cout<<sum<<" ";
             vkps.push_back(cv::KeyPoint(kps[i].pos.x,kps[i].pos.y,1 )); //kp size default =1
-//            std::cout<<kps[i].pos.x<<" "<<kps[i].pos.y<<std::endl;
-            std::cout<<"[ "<<kps[i].pos.x<<" , "<<kps[i].pos.y<<" ]   ";
+            std::cout<<kps[i].pos.x<<" "<<kps[i].pos.y<<std::endl;
+//            std::cout<<"[ "<<kps[i].pos.x<<" , "<<kps[i].pos.y<<" ]   ";
 
         }
         std::cout<<std::endl;
         return vkps;
-    }
-    int GetKeypointIDbyXY(float x, float y){
-        std::cout<<"Process frame ---"<<x<<"---"<<y<<"----"<<std::endl;
-        for(int j=0;j<numKeypoints2;j++){
-            if(x==vkps2[j].pt.x && y==vkps2[j].pt.y){
-                return j;
-            }
-        }
-        std::cout<<"[ "<<x<<" , "<<y<<" ] is not in img2"<<std::endl;
-        return -1;
     }
 
     std::vector<cv::KeyPoint> vkps1;
@@ -137,7 +195,7 @@ private:
     int depth_width;
     int depth_height;
     float minKeyScale=3;
-    float sensorDepthMin=0.1;
+    float sensorDepthMin=0.5;
     float sensorDepthMax=4;
     int featureCountThreshold=150;
     bool enableTiming=false;
@@ -209,7 +267,7 @@ private:
         unsigned int ncols = inputWidth *3;
         unsigned int nrows = inputHeight ;    //rgb has 3 channels
         for (int i = 0; i < nrows*ncols; i = i + 3) {
-            float tmp = (0.299f*cpu_input[i] + 0.587f*cpu_input[i + 1] + 0.114f*cpu_input[i + 2]) / 255.0f;   //输出0-1之间的值
+            float tmp = (0.299f*cpu_input[i+2] + 0.587f*cpu_input[i + 1] + 0.114f*cpu_input[i]) / 255.0f;   //输出0-1之间的值
             cpu_output[i / 3] = tmp;
 //            std::cout<<tmp<<" ";
 //            if(i%2048==0) std::cout<<std::endl;

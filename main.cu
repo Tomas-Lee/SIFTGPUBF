@@ -45,21 +45,21 @@ int main(int argc, char** argv) {
     siftImageManager.RunSIFT2(color2_ptr,depth2_ptr,5000);
     std::vector<cv::DMatch> matches=siftImageManager.Match();
 
-    cv::Mat kpmat1;
-    cv::drawKeypoints(color1,siftImageManager.vkps1,kpmat1);
-    cv::imwrite("kpmat0.png",kpmat1);
+//    cv::Mat kpmat1;
+//    cv::drawKeypoints(color1,siftImageManager.vkps1,kpmat1);
+//    cv::imwrite("kpmat0.png",kpmat1);
 //    cv::imshow("kps1",kpmat1);
 //    cv::waitKey();
 //
-    cv::Mat kpmat2;
-    cv::drawKeypoints(color2,siftImageManager.vkps2,kpmat2);
-    cv::imwrite("kpmat1.png",kpmat2);
+//    cv::Mat kpmat2;
+//    cv::drawKeypoints(color2,siftImageManager.vkps2,kpmat2);
+//    cv::imwrite("kpmat1.png",kpmat2);
 //    cv::imshow("kps2",kpmat2);
 //    cv::waitKey();
 
-    cv::Mat matchMat;
-    cv::drawMatches(color1,siftImageManager.vkps1,color2,siftImageManager.vkps2,matches,matchMat);
-    cv::imwrite("matches01.png",matchMat);
+//    cv::Mat matchMat;
+//    cv::drawMatches(color1,siftImageManager.vkps1,color2,siftImageManager.vkps2,matches,matchMat);
+//    cv::imwrite("matches01.png",matchMat);
 //    cv::imshow("matches",matchMat);
 //    cv::waitKey();
 
